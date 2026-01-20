@@ -50,7 +50,7 @@ func NewPostgreSink(dbConfig *DatabaseConfig) (*PostgreSink, error) {
 
 	// Prepare statement for default table
 	stmts := make(map[string]*sql.Stmt)
-	stmt, err := db.Prepare(`INSERT INTO ` + dbConfig.TableName + ` (service_name, request_start, request_end, response_status, request_body, response_body, request_path) VALUES ($1, $2, $3, $4, $5, $6, $7)`)
+	stmt, err := db.Prepare(`INSERT INTO ` + dbConfig.TableName + ` (service_name, request_time, request_duration, response_status, request_body, response_body, request_path) VALUES ($1, $2, $3, $4, $5, $6, $7)`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement for default table: %w", err)
 	}
@@ -83,14 +83,60 @@ func (p *PostgreSink) getStmt(tableName string) (*sql.Stmt, error) {
 		return stmt, nil
 	}
 
+	// Check if table exists, create if not
+	if err := p.ensureTableExists(tableName); err != nil {
+		return nil, fmt.Errorf("failed to ensure table %s exists: %w", tableName, err)
+	}
+
 	// Prepare new statement for this table
-	stmt, err := p.DB.Prepare(`INSERT INTO ` + tableName + ` (service_name, request_start, request_end, response_status, request_body, response_body, request_path) VALUES ($1, $2, $3, $4, $5, $6, $7)`)
+	stmt, err := p.DB.Prepare(`INSERT INTO ` + tableName + ` (service_name, request_time, request_duration, response_status, request_body, response_body, request_path) VALUES ($1, $2, $3, $4, $5, $6, $7)`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement for table %s: %w", tableName, err)
 	}
 
 	p.stmts[tableName] = stmt
 	return stmt, nil
+}
+
+// ensureTableExists checks if the table exists and creates it if it doesn't.
+func (p *PostgreSink) ensureTableExists(tableName string) error {
+	// Check if table exists
+	var exists bool
+	err := p.DB.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.tables
+			WHERE table_schema = 'public'
+			AND table_name = $1
+		)`, tableName).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("failed to check if table exists: %w", err)
+	}
+
+	if !exists {
+		// Create the table
+		createTableSQL := `
+			CREATE TABLE ` + tableName + ` (
+				service_name TEXT,
+				request_time TIMESTAMP,
+				request_duration BIGINT,
+				response_status TEXT,
+				request_body TEXT,
+				response_body TEXT,
+				request_path TEXT
+			)
+			WITH(
+				timescaledb.hypertable,
+				timescaledb.partition_column='request_time'
+			);`
+		_, err := p.DB.Exec(createTableSQL)
+		if err != nil {
+			return fmt.Errorf("failed to create table %s: %w", tableName, err)
+		}
+		log.Printf("Created table %s", tableName)
+	}
+
+	return nil
 }
 
 // batchItem holds a request context with its target table name
@@ -100,7 +146,7 @@ type batchItem struct {
 }
 
 // Send writes the RequestContext to PostgreSQL table.
-// The table must have columns: service_name, request_start, request_end,
+// The table must have columns: service_name, request_time, request_duration,
 // response_status, request_body, response_body, request_path
 func (p *PostgreSink) Send(ctx RequestContext) error {
 	ctx.Service = ctx.ExtractServiceName()
@@ -189,7 +235,8 @@ func (p *PostgreSink) flushTableBatch(tableName string, contexts []RequestContex
 	for _, ctx := range contexts {
 		status := ctx.ExtractStatus()
 		path := ctx.ExtractPath()
-		_, err := txStmt.Exec(ctx.Service, ctx.StartTime, ctx.EndTime, status, string(ctx.RequestBody), string(ctx.ResponseBody), path)
+		durationMs := ctx.EndTime.Sub(ctx.StartTime).Milliseconds()
+		_, err := txStmt.Exec(ctx.Service, ctx.StartTime, durationMs, status, string(ctx.RequestBody), string(ctx.ResponseBody), path)
 		if err != nil {
 			return fmt.Errorf("failed to insert batch item: %w", err)
 		}

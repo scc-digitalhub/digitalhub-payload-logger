@@ -35,7 +35,7 @@ func TestPostgreSink_Integration(t *testing.T) {
 
 	// Start PostgreSQL container
 	postgresContainer, err := postgres.Run(ctx,
-		"postgres:15-alpine",
+		"timescale/timescaledb:latest-pg17",
 		postgres.WithDatabase("testdb"),
 		postgres.WithUsername("testuser"),
 		postgres.WithPassword("testpass"),
@@ -80,13 +80,17 @@ func TestPostgreSink_Integration(t *testing.T) {
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS payloads (
 		service_name TEXT,
-		request_start TIMESTAMP,
-		request_end TIMESTAMP,
+		request_time TIMESTAMP,
+		request_duration BIGINT,
 		response_status TEXT,
 		request_body TEXT,
 		response_body TEXT,
 		request_path TEXT
-	)`)
+		)
+		WITH(
+			timescaledb.hypertable,
+			timescaledb.partition_column='request_time'
+		);`)
 	require.NoError(t, err)
 
 	// Create PostgreSink
@@ -113,24 +117,25 @@ func TestPostgreSink_Integration(t *testing.T) {
 
 	// Verify data was written by querying the database
 	var count int
-	err = sink.DB.QueryRow("SELECT COUNT(*) FROM payloads").Scan(&count)
+	err = sink.DB.QueryRow("SELECT COUNT(*) FROM test_service").Scan(&count)
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 
 	// Verify the data content
 	var serviceName, responseStatus, requestPath string
 	var requestBody, responseBody string
-	var requestStart, requestEnd time.Time
-	err = sink.DB.QueryRow("SELECT service_name, request_start, request_end, response_status, request_body, response_body, request_path FROM payloads LIMIT 1").
-		Scan(&serviceName, &requestStart, &requestEnd, &responseStatus, &requestBody, &responseBody, &requestPath)
+	var requestTime time.Time
+	var requestDuration int64
+	err = sink.DB.QueryRow("SELECT service_name, request_time, request_duration, response_status, request_body, response_body, request_path FROM test_service LIMIT 1").
+		Scan(&serviceName, &requestTime, &requestDuration, &responseStatus, &requestBody, &responseBody, &requestPath)
 	require.NoError(t, err)
 
 	assert.Equal(t, "test-service", serviceName)
 	assert.Equal(t, string(testRequest.RequestBody), requestBody)
 	assert.Equal(t, string(testRequest.ResponseBody), responseBody)
 	assert.Equal(t, "200", responseStatus)
-	assert.True(t, requestStart.After(time.Now().Add(-time.Minute)))
-	assert.True(t, requestEnd.After(requestStart))
+	assert.True(t, requestTime.After(time.Now().Add(-time.Minute)))
+	assert.True(t, requestTime.Add(time.Duration(requestDuration)*time.Millisecond).After(requestTime))
 }
 
 func TestPostgreSink_Integration_NewPostgreSink(t *testing.T) {
@@ -142,7 +147,7 @@ func TestPostgreSink_Integration_NewPostgreSink(t *testing.T) {
 
 	// Start PostgreSQL container
 	pgContainer, err := postgres.Run(ctx,
-		"postgres:15-alpine",
+		"timescale/timescaledb:latest-pg17",
 		postgres.WithDatabase("testdb"),
 		postgres.WithUsername("testuser"),
 		postgres.WithPassword("testpass"),
@@ -170,13 +175,16 @@ func TestPostgreSink_Integration_NewPostgreSink(t *testing.T) {
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS request_logs (
 		service_name TEXT,
-		request_start TIMESTAMP,
-		request_end TIMESTAMP,
+		request_time TIMESTAMP,
+		request_duration TIMESTAMP,
 		response_status TEXT,
 		request_body TEXT,
 		response_body TEXT,
 		request_path TEXT
-	)`)
+	)WITH(
+			timescaledb.hypertable,
+			timescaledb.partition_column='request_time'
+		);`)
 	require.NoError(t, err)
 
 	// Test successful creation
@@ -213,7 +221,7 @@ func TestPostgreSink_Integration_Send_Single(t *testing.T) {
 
 	// Start PostgreSQL container
 	pgContainer, err := postgres.Run(ctx,
-		"postgres:15-alpine",
+		"timescale/timescaledb:latest-pg17",
 		postgres.WithDatabase("testdb"),
 		postgres.WithUsername("testuser"),
 		postgres.WithPassword("testpass"),
@@ -242,13 +250,16 @@ func TestPostgreSink_Integration_Send_Single(t *testing.T) {
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS request_logs (
 			service_name TEXT,
-			request_start TIMESTAMP,
-			request_end TIMESTAMP,
+			request_time TIMESTAMP,
+			request_duration TIMESTAMP,
 			response_status TEXT,
 			request_body TEXT,
 			response_body TEXT,
 			request_path TEXT
-		)
+		)WITH(
+			timescaledb.hypertable,
+			timescaledb.partition_column='request_time'
+		);
 	`)
 	require.NoError(t, err)
 
@@ -297,20 +308,21 @@ func TestPostgreSink_Integration_Send_Single(t *testing.T) {
 
 	// Verify data was inserted
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM request_logs").Scan(&count)
+	err = db.QueryRow("SELECT COUNT(*) FROM test_service").Scan(&count)
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 
 	// Verify data content
 	var serviceName, responseStatus, requestPath string
 	var requestBody, responseBody string
-	var requestStart, requestEnd time.Time
+	var requestStart time.Time
+	var requestDuration int64
 
 	err = db.QueryRow(`
-		SELECT service_name, request_start, request_end, response_status,
+		SELECT service_name, request_time, request_duration, response_status,
 			   request_body, response_body, request_path
-		FROM request_logs LIMIT 1
-	`).Scan(&serviceName, &requestStart, &requestEnd, &responseStatus,
+		FROM test_service LIMIT 1
+	`).Scan(&serviceName, &requestStart, &requestDuration, &responseStatus,
 		&requestBody, &responseBody, &requestPath)
 
 	require.NoError(t, err)
@@ -321,7 +333,7 @@ func TestPostgreSink_Integration_Send_Single(t *testing.T) {
 	assert.Equal(t, "/api/test", requestPath)
 	// Check timestamps are within reasonable range
 	startDiff := requestStart.Sub(startTime)
-	endDiff := requestEnd.Sub(endTime)
+	endDiff := (requestStart.Add(time.Duration(requestDuration) * time.Millisecond)).Sub(endTime)
 
 	// Allow for some precision loss in database storage
 	assert.True(t, startDiff >= -time.Second && startDiff <= time.Second, "requestStart should be close to startTime")
@@ -337,7 +349,7 @@ func TestPostgreSink_Integration_Send_Batch(t *testing.T) {
 
 	// Start PostgreSQL container
 	pgContainer, err := postgres.Run(ctx,
-		"postgres:15-alpine",
+		"timescale/timescaledb:latest-pg17",
 		postgres.WithDatabase("testdb"),
 		postgres.WithUsername("testuser"),
 		postgres.WithPassword("testpass"),
@@ -366,13 +378,16 @@ func TestPostgreSink_Integration_Send_Batch(t *testing.T) {
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS request_logs (
 			service_name TEXT,
-			request_start TIMESTAMP,
-			request_end TIMESTAMP,
+			request_time TIMESTAMP,
+			request_duration TIMESTAMP,
 			response_status TEXT,
 			request_body TEXT,
 			response_body TEXT,
 			request_path TEXT
-		)
+		)WITH(
+			timescaledb.hypertable,
+			timescaledb.partition_column='request_time'
+		);
 	`)
 	require.NoError(t, err)
 
@@ -418,29 +433,27 @@ func TestPostgreSink_Integration_Send_Batch(t *testing.T) {
 	// Wait for flush
 	time.Sleep(200 * time.Millisecond)
 
-	// Verify all data was inserted
+	// Verify data was inserted
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM request_logs").Scan(&count)
+	err = db.QueryRow("SELECT COUNT(*) FROM service_1").Scan(&count)
 	require.NoError(t, err)
-	assert.Equal(t, 5, count)
-
-	// Verify specific records
-	rows, err := db.Query("SELECT service_name, request_body FROM request_logs ORDER BY service_name")
-	require.NoError(t, err)
-	defer rows.Close()
+	assert.Equal(t, 1, count)
 
 	expectedServices := []string{"service-0", "service-1", "service-2", "service-3", "service-4"}
-	i := 0
-	for rows.Next() {
+	for i := 0; i < 5; i++ {
+		// Verify specific records
+		rows, err := db.Query(fmt.Sprintf(`SELECT service_name, request_body FROM service_%d ORDER BY service_name`, i))
+		require.NoError(t, err)
+		defer rows.Close()
+
 		var serviceName string
 		var requestBody string
-		err := rows.Scan(&serviceName, &requestBody)
+		rows.Next()
+		err = rows.Scan(&serviceName, &requestBody)
 		require.NoError(t, err)
 		assert.Equal(t, expectedServices[i], serviceName)
 		assert.Equal(t, fmt.Sprintf(`{"input": "test-%d"}`, i), requestBody)
-		i++
 	}
-	assert.Equal(t, 5, i)
 }
 
 func TestPostgreSink_Integration_Send_BodyTruncation(t *testing.T) {
@@ -452,7 +465,7 @@ func TestPostgreSink_Integration_Send_BodyTruncation(t *testing.T) {
 
 	// Start PostgreSQL container
 	pgContainer, err := postgres.Run(ctx,
-		"postgres:15-alpine",
+		"timescale/timescaledb:latest-pg17",
 		postgres.WithDatabase("testdb"),
 		postgres.WithUsername("testuser"),
 		postgres.WithPassword("testpass"),
@@ -481,13 +494,16 @@ func TestPostgreSink_Integration_Send_BodyTruncation(t *testing.T) {
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS request_logs (
 			service_name TEXT,
-			request_start TIMESTAMP,
-			request_end TIMESTAMP,
+			request_time TIMESTAMP,
+			request_duration TIMESTAMP,
 			response_status TEXT,
 			request_body TEXT,
 			response_body TEXT,
 			request_path TEXT
-		)
+		)WITH(
+			timescaledb.hypertable,
+			timescaledb.partition_column='request_time'
+		);
 	`)
 	require.NoError(t, err)
 
@@ -542,7 +558,7 @@ func TestPostgreSink_Integration_Send_BodyTruncation(t *testing.T) {
 
 	// Verify data was inserted with truncated bodies
 	var requestBody, responseBody string
-	err = db.QueryRow("SELECT request_body, response_body FROM request_logs LIMIT 1").
+	err = db.QueryRow("SELECT request_body, response_body FROM test_service LIMIT 1").
 		Scan(&requestBody, &responseBody)
 	require.NoError(t, err)
 
@@ -562,7 +578,7 @@ func TestPostgreSink_Integration_ErrorHandling(t *testing.T) {
 
 	// Start PostgreSQL container
 	pgContainer, err := postgres.Run(ctx,
-		"postgres:15-alpine",
+		"timescale/timescaledb:latest-pg17",
 		postgres.WithDatabase("testdb"),
 		postgres.WithUsername("testuser"),
 		postgres.WithPassword("testpass"),
@@ -612,7 +628,7 @@ func TestPostgreSink_Integration_Close(t *testing.T) {
 
 	// Start PostgreSQL container
 	pgContainer, err := postgres.Run(ctx,
-		"postgres:15-alpine",
+		"timescale/timescaledb:latest-pg17",
 		postgres.WithDatabase("testdb"),
 		postgres.WithUsername("testuser"),
 		postgres.WithPassword("testpass"),
@@ -640,13 +656,16 @@ func TestPostgreSink_Integration_Close(t *testing.T) {
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS request_logs (
 		service_name TEXT,
-		request_start TIMESTAMP,
-		request_end TIMESTAMP,
+		request_time TIMESTAMP,
+		request_duration TIMESTAMP,
 		response_status TEXT,
 		request_body TEXT,
 		response_body TEXT,
 		request_path TEXT
-	)`)
+	)WITH(
+			timescaledb.hypertable,
+			timescaledb.partition_column='request_time'
+		);`)
 	require.NoError(t, err)
 
 	// Create sink

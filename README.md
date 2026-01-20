@@ -52,6 +52,8 @@ filters:
 
 The PostgreSQL sink supports dynamic table selection based on metadata. If the metadata contains a `service_name` field, it will be used instead of the configured default table name. This allows routing logs to different tables based on request characteristics.
 
+When a table is dynamically identified, the sink automatically checks if the table exists in the database. If it doesn't exist, the table is created with the appropriate schema before inserting data.
+
 Example Envoy configuration for dynamic table selection:
 
 ```yaml
@@ -63,11 +65,11 @@ filters:
       function envoy_on_request(request_handle)
         local path = request_handle:headers():get(":path")
         if string.match(path, "/api/v1/") then
-          request_handle:streamInfo():dynamicMetadata():set("digitalhub", "service_name", "api_v1")
+          request_handle:streamInfo():dynamicMetadata():set("digitalhub", "service_name", "api_v1_logs")
         elseif string.match(path, "/api/v2/") then
-          request_handle:streamInfo():dynamicMetadata():set("digitalhub", "service_name", "api_v2")
+          request_handle:streamInfo():dynamicMetadata():set("digitalhub", "service_name", "api_v2_logs")
         else
-          request_handle:streamInfo():dynamicMetadata():set("digitalhub", "service_name", "other")
+          request_handle:streamInfo():dynamicMetadata():set("digitalhub", "service_name", "other_logs")
         end
       end
 ```
@@ -102,7 +104,7 @@ Or with config file:
 ./payload-logger -config=configs/config.yaml
 ```
 
-### PostgreSQL Sink
+### PostgreSQL Sink (With TimescaleDB extension)
 
 Set environment variables:
 ```bash
@@ -127,8 +129,8 @@ For PostgreSQL sink, create the table:
 ```sql
 CREATE TABLE request_logs (
     service_name TEXT,
-    request_start TIMESTAMP,
-    request_end TIMESTAMP,
+    request_time TIMESTAMP,
+    request_duration BIGINT,
     response_status TEXT,
     request_body TEXT,
     response_body TEXT,
