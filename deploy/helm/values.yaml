@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository:  ghcr.io/scc-digitalhub/digitalhub-serverless/payload-logger
-  tag: "0.010"
+  tag: "0.1"
   pullPolicy: IfNotPresent
 
 service:

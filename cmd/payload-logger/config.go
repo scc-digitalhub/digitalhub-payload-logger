@@ -63,7 +63,7 @@ func LoadConfig(configPath string) (*Config, error) {
 			TableName:       "request_logs",
 			MaxRetries:      3,
 			BatchSize:       50,
-			FlushInterval:   10 * time.Second,
+			FlushInterval:   30 * time.Second,
 			MaxOpenConns:    25,
 			MaxIdleConns:    5,
 			ConnMaxLifetime: 5 * time.Minute,

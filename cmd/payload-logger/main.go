@@ -24,7 +24,7 @@ import (
 // It creates the appropriate sink, sets up the gRPC server, and starts listening.
 func main() {
 	configPath := flag.String("config", "", "path to configuration YAML file")
-	sinkType := flag.String("sink", "console", "type of sink (console, postgres) - overrides config")
+	sinkType := flag.String("sink", "", "type of sink (console, postgres) - overrides config")
 	flag.Parse()
 
 	config, err := LoadConfig(*configPath)

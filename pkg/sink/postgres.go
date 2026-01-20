@@ -50,11 +50,6 @@ func NewPostgreSink(dbConfig *DatabaseConfig) (*PostgreSink, error) {
 
 	// Prepare statement for default table
 	stmts := make(map[string]*sql.Stmt)
-	stmt, err := db.Prepare(`INSERT INTO ` + dbConfig.TableName + ` (service_name, request_time, request_duration, response_status, request_body, response_body, request_path) VALUES ($1, $2, $3, $4, $5, $6, $7)`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare statement for default table: %w", err)
-	}
-	stmts[dbConfig.TableName] = stmt
 
 	sink := &PostgreSink{
 		DB:          db,
