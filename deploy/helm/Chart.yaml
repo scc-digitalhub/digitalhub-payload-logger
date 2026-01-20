@@ -1,0 +1,6 @@
+apiVersion: v2
+name: payload-logger
+description: A Helm chart for Envoy ExtProc Payload Logger
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
