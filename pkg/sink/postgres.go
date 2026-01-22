@@ -180,7 +180,7 @@ func (p *PostgreSink) Send(ctx RequestContext) error {
 
 func extractTableName(functionName string, fallbackTableName string) string {
 	if functionName != "" && functionName != "_unknown_" {
-		return "log_" + strings.ReplaceAll(functionName, "-", "_")
+		return "log_" + strings.ReplaceAll(strings.ReplaceAll(functionName, ".", "_"), "-", "_")
 	}
 	return fallbackTableName
 }
