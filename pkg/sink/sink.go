@@ -27,6 +27,8 @@ type DatabaseConfig struct {
 // captured by the Envoy External Processor.
 type RequestContext struct {
 	Service         string            // Extracted service name
+	Function        string            // Extracted function name
+	Project         string            // Extracted project name
 	RequestHeaders  *corev3.HeaderMap // Request headers from Envoy
 	RequestBody     []byte            // Request body content
 	ResponseHeaders *corev3.HeaderMap // Response headers from Envoy
@@ -69,6 +71,36 @@ func (ctx *RequestContext) ExtractServiceName() string {
 	}
 	// fallback to headers
 	return extractValueFromHeaders(ctx.RequestHeaders, nameHeaders, "_unknown_")
+}
+
+// ExtractFunctionName extracts the function name from metadata or request headers.
+// Checks for 'function_name' metadata first, then falls back to common service name headers and returns "_unknown_" if not found.
+func (ctx *RequestContext) ExtractFunctionName() string {
+	// first check metadata
+	if ctx.Metadata != nil {
+		if val, ok := ctx.Metadata["function_name"]; ok {
+			if strVal, ok := val.(string); ok && strVal != "" {
+				return strVal
+			}
+		}
+	}
+	// fallback
+	return ctx.ExtractServiceName()
+}
+
+// ExtractProjectName extracts the project name from metadata.
+// Returns "_unknown_" if not found.
+func (ctx *RequestContext) ExtractProjectName() string {
+	// first check metadata
+	if ctx.Metadata != nil {
+		if val, ok := ctx.Metadata["project_name"]; ok {
+			if strVal, ok := val.(string); ok && strVal != "" {
+				return strVal
+			}
+		}
+	}
+	// fallback
+	return "_unknown_"
 }
 
 // ExtractStatus extracts the HTTP response status code from response headers.

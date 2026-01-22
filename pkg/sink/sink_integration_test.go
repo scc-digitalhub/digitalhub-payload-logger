@@ -80,6 +80,8 @@ func TestPostgreSink_Integration(t *testing.T) {
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS payloads (
 		service_name TEXT,
+		function_name TEXT,
+		project_name TEXT,
 		request_time TIMESTAMP,
 		request_duration BIGINT,
 		response_status TEXT,
@@ -117,20 +119,22 @@ func TestPostgreSink_Integration(t *testing.T) {
 
 	// Verify data was written by querying the database
 	var count int
-	err = sink.DB.QueryRow("SELECT COUNT(*) FROM test_service").Scan(&count)
+	err = sink.DB.QueryRow("SELECT COUNT(*) FROM log_test_service").Scan(&count)
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 
 	// Verify the data content
-	var serviceName, responseStatus, requestPath string
+	var serviceName, functionName, projectName, responseStatus, requestPath string
 	var requestBody, responseBody string
 	var requestTime time.Time
 	var requestDuration int64
-	err = sink.DB.QueryRow("SELECT service_name, request_time, request_duration, response_status, request_body, response_body, request_path FROM test_service LIMIT 1").
-		Scan(&serviceName, &requestTime, &requestDuration, &responseStatus, &requestBody, &responseBody, &requestPath)
+	err = sink.DB.QueryRow("SELECT service_name, function_name, project_name, request_time, request_duration, response_status, request_body, response_body, request_path FROM log_test_service LIMIT 1").
+		Scan(&serviceName, &functionName, &projectName, &requestTime, &requestDuration, &responseStatus, &requestBody, &responseBody, &requestPath)
 	require.NoError(t, err)
 
 	assert.Equal(t, "test-service", serviceName)
+	assert.Equal(t, "test-service", functionName)
+	assert.Equal(t, "_unknown_", projectName)
 	assert.Equal(t, string(testRequest.RequestBody), requestBody)
 	assert.Equal(t, string(testRequest.ResponseBody), responseBody)
 	assert.Equal(t, "200", responseStatus)
@@ -175,8 +179,10 @@ func TestPostgreSink_Integration_NewPostgreSink(t *testing.T) {
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS request_logs (
 		service_name TEXT,
+		function_name TEXT,
+		project_name TEXT,
 		request_time TIMESTAMP,
-		request_duration TIMESTAMP,
+		request_duration BIGINT,
 		response_status TEXT,
 		request_body TEXT,
 		response_body TEXT,
@@ -250,8 +256,10 @@ func TestPostgreSink_Integration_Send_Single(t *testing.T) {
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS request_logs (
 			service_name TEXT,
+			function_name TEXT,
+			project_name TEXT,
 			request_time TIMESTAMP,
-			request_duration TIMESTAMP,
+			request_duration BIGINT,
 			response_status TEXT,
 			request_body TEXT,
 			response_body TEXT,
@@ -308,25 +316,27 @@ func TestPostgreSink_Integration_Send_Single(t *testing.T) {
 
 	// Verify data was inserted
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM test_service").Scan(&count)
+	err = db.QueryRow("SELECT COUNT(*) FROM log_test_service").Scan(&count)
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 
 	// Verify data content
-	var serviceName, responseStatus, requestPath string
+	var serviceName, functionName, projectName, responseStatus, requestPath string
 	var requestBody, responseBody string
 	var requestStart time.Time
 	var requestDuration int64
 
 	err = db.QueryRow(`
-		SELECT service_name, request_time, request_duration, response_status,
+		SELECT service_name, function_name, project_name, request_time, request_duration, response_status,
 			   request_body, response_body, request_path
-		FROM test_service LIMIT 1
-	`).Scan(&serviceName, &requestStart, &requestDuration, &responseStatus,
+		FROM log_test_service LIMIT 1
+	`).Scan(&serviceName, &functionName, &projectName, &requestStart, &requestDuration, &responseStatus,
 		&requestBody, &responseBody, &requestPath)
 
 	require.NoError(t, err)
 	assert.Equal(t, "test-service", serviceName)
+	assert.Equal(t, "test-service", functionName)
+	assert.Equal(t, "_unknown_", projectName)
 	assert.Equal(t, "200", responseStatus)
 	assert.Equal(t, `{"input": "test"}`, requestBody)
 	assert.Equal(t, `{"output": "result"}`, responseBody)
@@ -378,8 +388,10 @@ func TestPostgreSink_Integration_Send_Batch(t *testing.T) {
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS request_logs (
 			service_name TEXT,
+			function_name TEXT,
+			project_name TEXT,
 			request_time TIMESTAMP,
-			request_duration TIMESTAMP,
+			request_duration BIGINT,
 			response_status TEXT,
 			request_body TEXT,
 			response_body TEXT,
@@ -435,14 +447,14 @@ func TestPostgreSink_Integration_Send_Batch(t *testing.T) {
 
 	// Verify data was inserted
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM service_1").Scan(&count)
+	err = db.QueryRow("SELECT COUNT(*) FROM log_service_1").Scan(&count)
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 
 	expectedServices := []string{"service-0", "service-1", "service-2", "service-3", "service-4"}
 	for i := 0; i < 5; i++ {
 		// Verify specific records
-		rows, err := db.Query(fmt.Sprintf(`SELECT service_name, request_body FROM service_%d ORDER BY service_name`, i))
+		rows, err := db.Query(fmt.Sprintf(`SELECT service_name, request_body FROM log_service_%d ORDER BY service_name`, i))
 		require.NoError(t, err)
 		defer rows.Close()
 
@@ -494,8 +506,10 @@ func TestPostgreSink_Integration_Send_BodyTruncation(t *testing.T) {
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS request_logs (
 			service_name TEXT,
+			function_name TEXT,
+			project_name TEXT,
 			request_time TIMESTAMP,
-			request_duration TIMESTAMP,
+			request_duration BIGINT,
 			response_status TEXT,
 			request_body TEXT,
 			response_body TEXT,
@@ -558,7 +572,7 @@ func TestPostgreSink_Integration_Send_BodyTruncation(t *testing.T) {
 
 	// Verify data was inserted with truncated bodies
 	var requestBody, responseBody string
-	err = db.QueryRow("SELECT request_body, response_body FROM test_service LIMIT 1").
+	err = db.QueryRow("SELECT request_body, response_body FROM log_test_service LIMIT 1").
 		Scan(&requestBody, &responseBody)
 	require.NoError(t, err)
 
@@ -613,10 +627,14 @@ func TestPostgreSink_Integration_ErrorHandling(t *testing.T) {
 	}
 
 	sink, err := NewPostgreSink(config)
-	// This should fail because the table doesn't exist
-	require.Error(t, err)
-	assert.Nil(t, sink)
-	assert.Contains(t, err.Error(), "relation \"nonexistent_table\" does not exist")
+	// This should succeed because tables are created automatically
+	require.NoError(t, err)
+	assert.NotNil(t, sink)
+	assert.Equal(t, "nonexistent_table", sink.TableName)
+
+	// Clean up
+	err = sink.Close()
+	assert.NoError(t, err)
 }
 
 func TestPostgreSink_Integration_Close(t *testing.T) {
@@ -656,8 +674,10 @@ func TestPostgreSink_Integration_Close(t *testing.T) {
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS request_logs (
 		service_name TEXT,
+		function_name TEXT,
+		project_name TEXT,
 		request_time TIMESTAMP,
-		request_duration TIMESTAMP,
+		request_duration BIGINT,
 		response_status TEXT,
 		request_body TEXT,
 		response_body TEXT,

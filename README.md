@@ -45,12 +45,14 @@ filters:
     inline_code: |
       function envoy_on_request(request_handle)
         request_handle:streamInfo():dynamicMetadata():set("digitalhub", "service_name", "my-service")
+        request_handle:streamInfo():dynamicMetadata():set("digitalhub", "function_name", "my-function")
+        request_handle:streamInfo():dynamicMetadata():set("digitalhub", "project_name", "my-project")
       end
 ```
 
 ### Dynamic Table Selection
 
-The PostgreSQL sink supports dynamic table selection based on metadata. If the metadata contains a `service_name` field, it will be used instead of the configured default table name. This allows routing logs to different tables based on request characteristics.
+The PostgreSQL sink supports dynamic table selection based on metadata. If the metadata contains a `function_name` or `service_name` field, it will be used instead of the configured default table name. This allows routing logs to different tables based on request characteristics.
 
 When a table is dynamically identified, the sink automatically checks if the table exists in the database. If it doesn't exist, the table is created with the appropriate schema before inserting data.
 
@@ -129,6 +131,8 @@ For PostgreSQL sink, create the table:
 ```sql
 CREATE TABLE request_logs (
     service_name TEXT,
+    function_name TEXT,
+    project_name TEXT,
     request_time TIMESTAMP,
     request_duration BIGINT,
     response_status TEXT,

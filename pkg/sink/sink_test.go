@@ -16,8 +16,21 @@ import (
 
 func createTestHeaderMap(headers map[string]string) *corev3.HeaderMap {
 	hvs := make([]*corev3.HeaderValue, 0, len(headers))
-	for k, v := range headers {
-		hvs = append(hvs, &corev3.HeaderValue{Key: k, Value: v})
+	// Sort keys to ensure consistent order
+	keys := make([]string, 0, len(headers))
+	for k := range headers {
+		keys = append(keys, k)
+	}
+	// Simple sort for test consistency
+	for i := 0; i < len(keys)-1; i++ {
+		for j := i + 1; j < len(keys); j++ {
+			if keys[i] > keys[j] {
+				keys[i], keys[j] = keys[j], keys[i]
+			}
+		}
+	}
+	for _, k := range keys {
+		hvs = append(hvs, &corev3.HeaderValue{Key: k, Value: headers[k]})
 	}
 	return &corev3.HeaderMap{Headers: hvs}
 }

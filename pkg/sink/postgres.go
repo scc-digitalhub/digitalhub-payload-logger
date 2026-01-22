@@ -84,7 +84,7 @@ func (p *PostgreSink) getStmt(tableName string) (*sql.Stmt, error) {
 	}
 
 	// Prepare new statement for this table
-	stmt, err := p.DB.Prepare(`INSERT INTO ` + tableName + ` (service_name, request_time, request_duration, response_status, request_body, response_body, request_path) VALUES ($1, $2, $3, $4, $5, $6, $7)`)
+	stmt, err := p.DB.Prepare(`INSERT INTO ` + tableName + ` (service_name, function_name, project_name, request_time, request_duration, response_status, request_body, response_body, request_path) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement for table %s: %w", tableName, err)
 	}
@@ -113,6 +113,8 @@ func (p *PostgreSink) ensureTableExists(tableName string) error {
 		createTableSQL := `
 			CREATE TABLE ` + tableName + ` (
 				service_name TEXT,
+				function_name TEXT,
+				project_name TEXT,
 				request_time TIMESTAMP,
 				request_duration BIGINT,
 				response_status TEXT,
@@ -141,11 +143,13 @@ type batchItem struct {
 }
 
 // Send writes the RequestContext to PostgreSQL table.
-// The table must have columns: service_name, request_time, request_duration,
+// The table must have columns: service_name, function_name, project_name, request_time, request_duration,
 // response_status, request_body, response_body, request_path
 func (p *PostgreSink) Send(ctx RequestContext) error {
 	ctx.Service = ctx.ExtractServiceName()
-	tableName := extractTableName(ctx.Service, p.TableName)
+	ctx.Function = ctx.ExtractFunctionName()
+	ctx.Project = ctx.ExtractProjectName()
+	tableName := extractTableName(ctx.Function, p.TableName)
 
 	// Ensure statement exists for this table
 	_, err := p.getStmt(tableName)
@@ -174,9 +178,9 @@ func (p *PostgreSink) Send(ctx RequestContext) error {
 	return nil
 }
 
-func extractTableName(serviceName, fallbackTableName string) string {
-	if serviceName != "" && serviceName != "_unknown_" {
-		return strings.Replace(serviceName, "-", "_", -1)
+func extractTableName(functionName string, fallbackTableName string) string {
+	if functionName != "" && functionName != "_unknown_" {
+		return "log_" + strings.ReplaceAll(functionName, "-", "_")
 	}
 	return fallbackTableName
 }
@@ -231,7 +235,7 @@ func (p *PostgreSink) flushTableBatch(tableName string, contexts []RequestContex
 		status := ctx.ExtractStatus()
 		path := ctx.ExtractPath()
 		durationMs := ctx.EndTime.Sub(ctx.StartTime).Milliseconds()
-		_, err := txStmt.Exec(ctx.Service, ctx.StartTime, durationMs, status, string(ctx.RequestBody), string(ctx.ResponseBody), path)
+		_, err := txStmt.Exec(ctx.Service, ctx.Function, ctx.Project, ctx.StartTime, durationMs, status, string(ctx.RequestBody), string(ctx.ResponseBody), path)
 		if err != nil {
 			return fmt.Errorf("failed to insert batch item: %w", err)
 		}
